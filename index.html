@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Car Game</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+  </style>
+
+  <!-- Load Three.js and Cannon-es directly from the web (No terminal needed!) -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <script type="module">
+    import * as THREE from 'three';
+    import * as CANNON from 'cannon-es';
+
+    // 1. Scene & Camera Setup
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(20, 40, 20);
+    scene.add(dirLight);
+
+    // 2. Physics World
+    const world = new CANNON.World();
+    world.gravity.set(0, -9.82, 0);
+
+    // Ground Physics & Visual
+    const groundMaterial = new CANNON.Material('ground');
+    const groundBody = new CANNON.Body({
+      mass: 0,
+      shape: new CANNON.Plane(),
+      material: groundMaterial,
+    });
+    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+    world.addBody(groundBody);
+
+    const groundMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(300, 300),
+      new THREE.MeshStandardMaterial({ color: 0x333333 })
+    );
+    groundMesh.rotation.x = -Math.PI / 2;
+    scene.add(groundMesh);
+
+    // 3. Car Body Physics
+    const chassisShape = new CANNON.Box(new CANNON.Vec3(1, 0.4, 2));
+    const chassisBody = new CANNON.Body({ mass: 1500 });
+    chassisBody.addShape(chassisShape);
+    chassisBody.position.set(0, 3, 0);
+
+    const vehicle = new CANNON.RaycastVehicle({
+      chassisBody: chassisBody,
+      indexRightAxis: 0,
+      indexUpAxis: 1,
+      indexForwardAxis: 2,
+    });
+
+    // Car Body Visual (Red Box)
+    const chassisMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 0.8, 4),
+      new THREE.MeshStandardMaterial({ color: 0xff0000 })
+    );
+    scene.add(chassisMesh);
+
+    // Wheel Options
+    const wheelOptions = {
+      radius: 0.5,
+      directionLocal: new CANNON.Vec3(0, -1, 0),
+      suspensionStiffness: 30,
+      suspensionRestLength: 0.3,
+      frictionSlip: 1.4,
+      dampingRelaxation: 2.3,
+      dampingCompression: 4.4,
+      maxSuspensionForce: 100000,
+      rollInfluence: 0.01,
+      axleLocal: new CANNON.Vec3(1, 0, 0),
+      chassisConnectionPointLocal: new CANNON.Vec3(1, 1, 1),
+      maxSuspensionTravel: 0.3,
+      customSlidingRotationalSpeed: -30,
+      useCustomSlidingRotationalSpeed: true,
+    };
+
+    const wheelPositions = [
+      new CANNON.Vec3(-1.1, -0.2, 1.2),
+      new CANNON.Vec3(1.1, -0.2, 1.2),
+      new CANNON.Vec3(-1.1, -0.2, -1.2),
+      new CANNON.Vec3(1.1, -0.2, -1.2),
+    ];
+
+    wheelPositions.forEach((pos) => {
+      wheelOptions.chassisConnectionPointLocal = pos;
+      vehicle.addWheel(wheelOptions);
+    });
+
+    vehicle.addToWorld(world);
+
+    // Wheel Visuals (Black Cylinders)
+    const wheelMeshes = [];
+    const wheelGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16);
+    wheelGeometry.rotateZ(Math.PI / 2);
+    const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x111111 });
+
+    for (let i = 0; i < 4; i++) {
+      const mesh = new THREE.Mesh(wheelGeometry, wheelMaterial);
+      scene.add(mesh);
+      wheelMeshes.push(mesh);
+    }
+
+    // 4. Controls
+    const keys = {};
+    window.addEventListener('keydown', (e) => (keys[e.key.toLowerCase()] = true));
+    window.addEventListener('keyup', (e) => (keys[e.key.toLowerCase()] = false));
+
+    function updateInputs() {
+      const maxSteerVal = 0.5;
+      const maxForce = 1200;
+      const brakeForce = 100;
+
+      // Steering
+      if (keys['a'] || keys['arrowleft']) {
+        vehicle.setSteeringValue(maxSteerVal, 0);
+        vehicle.setSteeringValue(maxSteerVal, 1);
+      } else if (keys['d'] || keys['arrowright']) {
+        vehicle.setSteeringValue(-maxSteerVal, 0);
+        vehicle.setSteeringValue(-maxSteerVal, 1);
+      } else {
+        vehicle.setSteeringValue(0, 0);
+        vehicle.setSteeringValue(0, 1);
+      }
+
+      // Acceleration & Reverse
+      if (keys['w'] || keys['arrowup']) {
+        vehicle.applyEngineForce(-maxForce, 2);
+        vehicle.applyEngineForce(-maxForce, 3);
+      } else if (keys['s'] || keys['arrowdown']) {
+        vehicle.applyEngineForce(maxForce, 2);
+        vehicle.applyEngineForce(maxForce, 3);
+      } else {
+        vehicle.applyEngineForce(0, 2);
+        vehicle.applyEngineForce(0, 3);
+      }
+
+      // Handbrake
+      if (keys[' ']) {
+        vehicle.setBrake(brakeForce, 2);
+        vehicle.setBrake(brakeForce, 3);
+      } else {
+        vehicle.setBrake(0, 2);
+        vehicle.setBrake(0, 3);
+      }
+    }
+
+    // 5. Game Loop
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const delta = clock.getDelta();
+      world.step(1 / 60, delta, 3);
+
+      updateInputs();
+
+      // Sync visual meshes with physics bodies
+      chassisMesh.position.copy(chassisBody.position);
+      chassisMesh.quaternion.copy(chassisBody.quaternion);
+
+      for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+        vehicle.updateWheelTransform(i);
+        const transform = vehicle.wheelInfos[i].worldTransform;
+        wheelMeshes[i].position.copy(transform.position);
+        wheelMeshes[i].quaternion.copy(transform.quaternion);
+      }
+
+      // Follow Camera
+      const offset = new THREE.Vector3(0, 4, -8);
+      offset.applyQuaternion(chassisMesh.quaternion);
+      camera.position.copy(chassisMesh.position).add(offset);
+      camera.lookAt(chassisMesh.position);
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
